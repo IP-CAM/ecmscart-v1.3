@@ -1,0 +1,171 @@
+<?php
+class ControllerProductCompare extends Controller {
+	public function index() {
+		$this->data = $this->load->language('product/compare');
+
+		$this->load->model('catalog/product');
+
+		$this->load->model('tool/image');
+
+		if (!isset($this->session->data['compare'])) {
+			$this->session->data['compare'] = array();
+		}
+
+		if (isset($this->request->get['remove'])) {
+			$key = array_search($this->request->get['remove'], $this->session->data['compare']);
+
+			if ($key !== false) {
+				unset($this->session->data['compare'][$key]);
+			}
+
+			$this->session->data['success'] = $this->data['text_remove'];
+
+			$this->response->redirect($this->url->link('product/compare'));
+		}
+
+		$this->document->setTitle($this->data['heading_title']);
+		
+		$this->data['breadcrumbs'] = $this->config->breadcrums(array(
+							$this->data['text_home'],	// Text to display link
+							$this->url->link('common/home'), 		// Link URL
+							$this->data['heading_title'],	// Text to display link
+							$this->url->link('product/compare')	// Link URL
+						));
+		
+		$this->data['success'] =  (isset($this->session->data['success'])? $this->session->data['success']: '');
+		
+		if (isset($this->session->data['success']))  // To unset success session variable.
+			unset($this->session->data['success']);
+		
+		$this->data['review_status'] = $this->config->get('config_review_status');
+
+		$this->data['products'] = array();
+
+		$this->data['attribute_groups'] = array();
+
+		foreach ($this->session->data['compare'] as $key => $product_id) {
+			$product_info = $this->model_catalog_product->getProduct($product_id);
+
+			if ($product_info) {
+				if ($product_info['image']) {
+					$image = $this->model_tool_image->resize($product_info['image'], $this->config->get('config_image_compare_width'), $this->config->get('config_image_compare_height'));
+				} else {
+					$image = false;
+				}
+
+				if (($this->config->get('config_customer_price') && $this->customer->isLogged()) || !$this->config->get('config_customer_price')) {
+					$price = $this->currency->format($this->tax->calculate($product_info['price'], $product_info['tax_class_id'], $this->config->get('config_tax')));
+				} else {
+					$price = false;
+				}
+
+				if ((float)$product_info['special']) {
+					$special = $this->currency->format($this->tax->calculate($product_info['special'], $product_info['tax_class_id'], $this->config->get('config_tax')));
+				} else {
+					$special = false;
+				}
+
+				if ($product_info['quantity'] <= 0) {
+					$availability = $product_info['stock_status'];
+				} elseif ($this->config->get('config_stock_display')) {
+					$availability = $product_info['quantity'];
+				} else {
+					$availability = $this->data['text_instock'];
+				}
+
+				$attribute_data = array();
+
+				$attribute_groups = $this->model_catalog_product->getProductAttributes($product_id);
+
+				foreach ($attribute_groups as $attribute_group) {
+					foreach ($attribute_group['attribute'] as $attribute) {
+						$attribute_data[$attribute['attribute_id']] = $attribute['text'];
+					}
+				}
+
+				$this->data['products'][$product_id] = array(
+					'product_id'   => $product_info['product_id'],
+					'name'         => $product_info['name'],
+					'thumb'        => $image,
+					'price'        => $price,
+					'special'      => $special,
+					'description'  => utf8_substr(strip_tags(html_entity_decode($product_info['description'], ENT_QUOTES, 'UTF-8')), 0, 200) . '..',
+					'model'        => $product_info['model'],
+					'manufacturer' => $product_info['manufacturer'],
+					'availability' => $availability,
+					'rating'       => (int)$product_info['rating'],
+					'reviews'      => sprintf($this->data['text_reviews'], (int)$product_info['reviews']),
+					'weight'       => $this->weight->format($product_info['weight'], $product_info['weight_class_id']),
+					'length'       => $this->length->format($product_info['length'], $product_info['length_class_id']),
+					'width'        => $this->length->format($product_info['width'], $product_info['length_class_id']),
+					'height'       => $this->length->format($product_info['height'], $product_info['length_class_id']),
+					'attribute'    => $attribute_data,
+					'href'         => $this->url->link('product/product', 'product_id=' . $product_id),
+					'remove'       => $this->url->link('product/compare', 'remove=' . $product_id)
+				);
+
+				foreach ($attribute_groups as $attribute_group) {
+					$this->data['attribute_groups'][$attribute_group['attribute_group_id']]['name'] = $attribute_group['name'];
+
+					foreach ($attribute_group['attribute'] as $attribute) {
+						$this->data['attribute_groups'][$attribute_group['attribute_group_id']]['attribute'][$attribute['attribute_id']]['name'] = $attribute['name'];
+					}
+				}
+			} else {
+				unset($this->session->data['compare'][$key]);
+			}
+		}
+
+		$this->data['continue'] = $this->url->link('common/home');
+
+		$this->data['column_left'] = $this->load->controller('common/column_left');
+		$this->data['column_right'] = $this->load->controller('common/column_right');
+		$this->data['content_top'] = $this->load->controller('common/content_top');
+		$this->data['content_bottom'] = $this->load->controller('common/content_bottom');
+		$this->data['footer'] = $this->load->controller('common/footer');
+		$this->data['header'] = $this->load->controller('common/header');
+
+		if (file_exists(DIR_TEMPLATE . $this->config->get('config_template') . '/template/product/compare.tpl')) {
+			$this->response->setOutput($this->load->view($this->config->get('config_template') . '/template/product/compare.tpl', $this->data));
+		} else {
+			$this->response->setOutput($this->load->view('default/template/product/compare.tpl', $this->data));
+		}
+	}
+
+	public function add() {
+		$this->data = $this->load->language('product/compare');
+
+		$json = array();
+
+		if (!isset($this->session->data['compare'])) {
+			$this->session->data['compare'] = array();
+		}
+
+		$product_id = $this->request->post('product_id',0);
+		
+		$this->load->model('catalog/product');
+
+		$product_info = $this->model_catalog_product->getProduct($product_id);
+
+		if ($product_info) {
+			if (!in_array($this->request->post['product_id'], $this->session->data['compare'])) {
+				if (count($this->session->data['compare']) >= 4) {
+					array_shift($this->session->data['compare']);
+				}
+
+				$this->session->data['compare'][] = $this->request->post['product_id'];
+			}
+
+			$json['success'] = sprintf($this->data['text_success'], $this->url->link('product/product', 'product_id=' . $this->request->post['product_id']), $product_info['name'], $this->url->link('product/compare'));
+
+			$json['total'] = sprintf($this->data['text_compare'], (isset($this->session->data['compare']) ? count($this->session->data['compare']) : 0));
+		}
+
+		$this->response->addHeader('Content-Type: application/json');
+		$this->response->setOutput(json_encode($json));
+	}
+
+	public function remove() {
+
+	}
+}
